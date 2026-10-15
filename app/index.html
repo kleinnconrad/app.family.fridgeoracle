@@ -82,11 +82,18 @@
       <div id="meals"></div>
       <div class="row">
         <button id="more-btn" type="button" class="secondary">Andere Ideen</button>
-        <button id="restart-btn" type="button" class="secondary">Neue Fotos</button>
       </div>
     </section>
 
     <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <div id="reset-bar" class="reset-bar" hidden>
+      <button id="reset-btn" type="button" class="hold-button">
+        <span class="hold-fill" aria-hidden="true"></span>
+        <span class="hold-label">Neu starten</span>
+      </button>
+      <p class="hint">Gedrückt halten, um zum Startbildschirm zurückzukehren. Der Verlauf bleibt erhalten.</p>
+    </div>
 
     <details id="history-block" class="card">
       <summary>Verlauf (gekochte und abgelehnte Gerichte)</summary>

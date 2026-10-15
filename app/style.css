@@ -129,6 +129,33 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 
+/* Press-and-hold reset: the fill grows while the button is held */
+.reset-bar { margin: 24px 0; text-align: center; }
+.reset-bar .hint { font-size: 0.85rem; }
+.hold-button {
+  position: relative;
+  overflow: hidden;
+  min-width: 200px;
+  background: transparent;
+  color: var(--error);
+  border: 1px solid var(--error);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.hold-fill {
+  position: absolute; inset: 0;
+  background: var(--error);
+  opacity: 0.25;
+  transform: scaleX(0);
+  transform-origin: left;
+}
+.hold-button.holding .hold-fill {
+  transform: scaleX(1);
+  transition: transform var(--hold-duration, 1500ms) linear;
+}
+.hold-label { position: relative; }
+
 .status { min-height: 1.5em; color: var(--muted); }
 .status.error { color: var(--error); }
 .status.busy::before {

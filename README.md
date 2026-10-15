@@ -25,6 +25,8 @@ The app runs entirely on the phone: there is no server. The phone loads the app 
   - Every suggested meal is blocked for 3 days.
   - A meal marked with "Kochen wir" (we cook this) is blocked for 14 days.
   - A meal marked with "Nicht für uns" (not for us) is blocked permanently. It can be released again in the history.
+- The current run (photos, corrected ingredients, answers, suggested meals) is saved on the phone and survives a page reload. A Gemini request interrupted by a reload is reported and can be started again.
+- "Neu starten" returns to the start screen. The button has to be held for 1.5 seconds, so that the run is not discarded by accident; the meal history is kept.
 - Installable from Chrome: home-screen icon, full-screen window, starts without network (analysis needs network).
 
 ## How it works
@@ -32,7 +34,7 @@ The app runs entirely on the phone: there is no server. The phone loads the app 
 1. **Photo analysis.** The photos are scaled to a long edge of 3072 px and sent to Gemini with high media resolution, together with the list of allowed staples and the list of blocked meals. Gemini returns the detected ingredients and a few draft meals. Each draft lists the staples it needs.
 2. **Questions.** The app collects the staples the drafts need and asks which of them are at home.
 3. **Selection.** Drafts that need a missing staple, use an ingredient the user removed, or are blocked by the memory are dropped. If too few meals remain, Gemini is asked again with the confirmed ingredient list (text only, no photo).
-4. **Memory.** The shown meals and the feedback are stored in the browser storage of the phone (`localStorage`).
+4. **Memory.** The shown meals and the feedback are stored in the browser storage of the phone (`localStorage`). The current run is stored separately in IndexedDB, because the photos are too large for `localStorage`.
 
 The default model is `gemini-pro-latest`, an alias for the current Gemini Pro model. `gemini-2.5-pro` is no longer available for new API keys. A photo analysis takes about one minute.
 
@@ -89,6 +91,7 @@ app/                  Published web app (no build step)
   js/planner.js       Flow logic: staple questions, filtering, refilling
   js/gemini.js        Gemini REST calls, prompts, response schemas
   js/memory.js        Meal history and pantry answers in localStorage
+  js/session.js       Current run in IndexedDB (survives a reload)
   js/settings.js      Settings in localStorage
   js/photos.js        Scaling and encoding of photos
   js/staples.js       Pantry staples and always-available basics

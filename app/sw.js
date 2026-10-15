@@ -2,7 +2,7 @@
 // Network first for the app files, so that updates arrive on the next start;
 // the cache is only the fallback. Requests to Gemini are not touched.
 
-const CACHE = "fridge-oracle-v1";
+const CACHE = "fridge-oracle-v2";
 const APP_FILES = [
   "./",
   "index.html",
@@ -13,6 +13,7 @@ const APP_FILES = [
   "js/memory.js",
   "js/photos.js",
   "js/planner.js",
+  "js/session.js",
   "js/settings.js",
   "js/staples.js",
   "icons/icon-192.png",
