@@ -1,0 +1,11 @@
+# Secrets (local API key for the end-to-end script)
+.env
+
+# Node
+node_modules/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

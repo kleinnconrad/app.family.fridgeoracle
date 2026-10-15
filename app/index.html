@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2f6f4f">
+  <meta name="description" content="Kühlschrank fotografieren, Gerichte vorgeschlagen bekommen.">
+  <title>Kühlschrank-Orakel</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header class="top">
+      <div>
+        <h1>Kühlschrank-Orakel</h1>
+        <p class="hint">Kühlschrank fotografieren, Gerichte vorgeschlagen bekommen.</p>
+      </div>
+      <button id="settings-btn" type="button" class="icon-button" title="Einstellungen" aria-label="Einstellungen">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+      </button>
+    </header>
+
+    <section id="settings" class="card" hidden>
+      <h2>Einstellungen</h2>
+      <form id="settings-form" class="form">
+        <label>Gemini-API-Schlüssel
+          <input id="set-api-key" type="password" autocomplete="off" spellcheck="false" required>
+        </label>
+        <p class="hint">Kostenlos erhältlich unter <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Der Schlüssel wird nur auf diesem Gerät gespeichert.</p>
+        <label>Modell
+          <input id="set-model" type="text" list="model-options" autocomplete="off" spellcheck="false">
+          <datalist id="model-options"></datalist>
+        </label>
+        <label>Anzahl Personen
+          <input id="set-servings" type="number" min="1" max="20" inputmode="numeric">
+        </label>
+        <label>Ernährungshinweise
+          <input id="set-notes" type="text" placeholder="z. B. kein Schweinefleisch, ein Kind isst vegetarisch">
+        </label>
+        <label>Vorschläge pro Runde
+          <input id="set-meal-count" type="number" min="1" max="8" inputmode="numeric">
+        </label>
+        <div class="row">
+          <button type="submit">Speichern</button>
+          <button id="settings-cancel" type="button" class="secondary">Abbrechen</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="step-upload" class="card">
+      <h2>1. Fotos vom Kühlschrank</h2>
+      <p class="hint">Bis zu 4 Fotos, z. B. Fächer, Tür und Gemüsefach.</p>
+      <div class="row">
+        <label class="button secondary" for="camera-input">Foto aufnehmen</label>
+        <label class="button secondary" for="gallery-input">Aus Galerie wählen</label>
+      </div>
+      <input id="camera-input" type="file" accept="image/*" capture="environment" hidden>
+      <input id="gallery-input" type="file" accept="image/*" multiple hidden>
+      <div id="previews" class="previews"></div>
+      <button id="analyze-btn" type="button" class="wide" disabled>Kühlschrank analysieren</button>
+    </section>
+
+    <section id="step-review" class="card" hidden>
+      <h2>2. Zutaten prüfen</h2>
+      <p class="hint">Falsch erkannte Zutaten entfernen, fehlende ergänzen.</p>
+      <ul id="ingredients" class="chips"></ul>
+      <form id="add-form" class="add-row">
+        <input id="add-input" type="text" placeholder="Zutat hinzufügen" autocomplete="off">
+        <button type="submit" class="secondary">Hinzufügen</button>
+      </form>
+      <div id="staples-block">
+        <h3>Ist das im Haus?</h3>
+        <div id="staples" class="checks"></div>
+      </div>
+      <button id="suggest-btn" type="button" class="wide">Gerichte anzeigen</button>
+    </section>
+
+    <section id="step-results" class="card" hidden>
+      <h2>3. Vorschläge</h2>
+      <div id="meals"></div>
+      <div class="row">
+        <button id="more-btn" type="button" class="secondary">Andere Ideen</button>
+        <button id="restart-btn" type="button" class="secondary">Neue Fotos</button>
+      </div>
+    </section>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <details id="history-block" class="card">
+      <summary>Verlauf (gekochte und abgelehnte Gerichte)</summary>
+      <ul id="history" class="history"></ul>
+    </details>
+  </main>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
