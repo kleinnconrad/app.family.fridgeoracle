@@ -26,9 +26,9 @@ async function shrink(file) {
 }
 
 /**
- * Returns the photo ready for upload, plus a preview URL.
+ * Returns the photo ready for upload.
  * @param {File} file Photo from the camera or the gallery.
- * @returns {Promise<{data: string, mimeType: string, previewUrl: string}>}
+ * @returns {Promise<{data: string, mimeType: string}>} Base64-encoded image data.
  */
 export async function preparePhoto(file) {
   let blob = null;
@@ -38,9 +38,5 @@ export async function preparePhoto(file) {
     // The browser cannot decode the format; upload the original
   }
   blob ??= file;
-  return {
-    data: await blobToBase64(blob),
-    mimeType: blob.type || "image/jpeg",
-    previewUrl: URL.createObjectURL(blob),
-  };
+  return { data: await blobToBase64(blob), mimeType: blob.type || "image/jpeg" };
 }

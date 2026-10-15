@@ -1,26 +1,28 @@
 // UI of the app. All user-facing text is German; code and comments are English.
+//
+// The current run lives in `session` and is saved to IndexedDB after every change,
+// so that a reload restores it. Every render function draws from `session`.
 
 import { createGemini } from "./gemini.js";
 import { Memory } from "./memory.js";
 import { preparePhoto } from "./photos.js";
 import { Planner } from "./planner.js";
+import { createSessionStore, emptySession } from "./session.js";
 import { MODEL_OPTIONS, loadSettings, saveSettings } from "./settings.js";
 import { stapleLabel } from "./staples.js";
 
 const MAX_PHOTOS = 4;
+const RESET_HOLD_MS = 1500;
+const SCROLL_KEY = "fridge-oracle:scroll";
 const DIFFICULTY_LABELS = { easy: "einfach", medium: "mittel", hard: "anspruchsvoll" };
 const KIND_LABELS = { cooked: "gekocht", rejected: "abgelehnt" };
 
 const memory = new Memory();
+const sessionStore = createSessionStore();
 let settings = loadSettings();
-
-const state = {
-  photos: [], // [{data, mimeType, previewUrl}]
-  ingredients: [], // [{name, quantity}]
-  drafts: [], // draft meals from the photo analysis
-  ingredientsAdded: false,
-  staples: { available: [], missing: [] },
-};
+let session = emptySession();
+// Incremented on reset; answers of requests started before a reset are discarded
+let runId = 0;
 
 const $ = (id) => document.getElementById(id);
 
@@ -46,18 +48,46 @@ function createPlanner() {
   return new Planner({ oracle, memory, mealCount: settings.mealCount });
 }
 
-async function withBusy(buttons, message, action) {
+// ---------- Persistence ----------
+
+function saveState() {
+  sessionStore.saveState(session).catch((error) => console.warn("Saving the run failed:", error));
+}
+
+function savePhotos() {
+  sessionStore.savePhotos(session.photos).catch((error) => console.warn("Saving the photos failed:", error));
+}
+
+function photoUrl(photo) {
+  return `data:${photo.mimeType};base64,${photo.data}`;
+}
+
+/**
+ * Runs a Gemini request with busy indicator. The pending flag is saved, so that a reload
+ * during the request can tell the user to start it again.
+ */
+async function runRequest(kind, buttons, message, request, apply) {
+  const startedRun = runId;
   buttons.forEach((button) => (button.disabled = true));
   setStatus(message, { busy: true });
+  session.pending = kind;
+  saveState();
   try {
-    await action();
+    const result = await request();
+    if (startedRun !== runId) return;
+    apply(result);
     setStatus("");
   } catch (error) {
+    if (startedRun !== runId) return;
     console.error(error);
     setStatus(error.message || "Unbekannter Fehler.", { error: true });
   } finally {
-    buttons.forEach((button) => (button.disabled = false));
-    $("analyze-btn").disabled = state.photos.length === 0;
+    if (startedRun === runId) {
+      session.pending = null;
+      saveState();
+      buttons.forEach((button) => (button.disabled = false));
+      renderAll();
+    }
   }
 }
 
@@ -94,27 +124,27 @@ $("settings-form").addEventListener("submit", (event) => {
 
 function renderPreviews() {
   $("previews").replaceChildren(
-    ...state.photos.map((photo, index) =>
+    ...session.photos.map((photo, index) =>
       el("div", { className: "preview" }, [
-        el("img", { src: photo.previewUrl, alt: `Foto ${index + 1}` }),
+        el("img", { src: photoUrl(photo), alt: `Foto ${index + 1}` }),
         el("button", {
           type: "button",
           textContent: "×",
           title: "Foto entfernen",
           onclick: () => {
-            URL.revokeObjectURL(photo.previewUrl);
-            state.photos.splice(index, 1);
-            renderPreviews();
+            session.photos.splice(index, 1);
+            savePhotos();
+            renderAll();
           },
         }),
       ]),
     ),
   );
-  $("analyze-btn").disabled = state.photos.length === 0;
+  $("analyze-btn").disabled = session.photos.length === 0 || session.pending !== null;
 }
 
 async function addPhotos(event) {
-  const free = MAX_PHOTOS - state.photos.length;
+  const free = MAX_PHOTOS - session.photos.length;
   const files = [...event.target.files].slice(0, free);
   event.target.value = "";
   if (files.length === 0 && free === 0) {
@@ -123,12 +153,13 @@ async function addPhotos(event) {
   }
   setStatus("Fotos werden vorbereitet.", { busy: true });
   try {
-    for (const file of files) state.photos.push(await preparePhoto(file));
+    for (const file of files) session.photos.push(await preparePhoto(file));
     setStatus("");
   } catch (error) {
     setStatus(`Foto konnte nicht gelesen werden: ${error.message}`, { error: true });
   }
-  renderPreviews();
+  savePhotos();
+  renderAll();
 }
 
 $("camera-input").addEventListener("change", addPhotos);
@@ -140,24 +171,33 @@ $("analyze-btn").addEventListener("click", () => {
     setStatus("Bitte zuerst den API-Schlüssel eintragen.", { error: true });
     return;
   }
-  withBusy([$("analyze-btn")], "Die Fotos werden analysiert. Das dauert etwa eine Minute.", async () => {
-    const result = await createPlanner().analyze(state.photos);
-    state.ingredients = result.ingredients;
-    state.drafts = result.draftMeals;
-    state.ingredientsAdded = false;
-    renderIngredients();
-    renderStaples(result.staplesToAsk);
-    $("step-review").hidden = false;
-    $("step-results").hidden = true;
-    $("step-review").scrollIntoView({ behavior: "smooth" });
-  });
+  runRequest(
+    "analyze",
+    [$("analyze-btn")],
+    "Die Fotos werden analysiert. Das dauert etwa eine Minute.",
+    () => createPlanner().analyze(session.photos),
+    (result) => {
+      Object.assign(session, {
+        analyzed: true,
+        ingredients: result.ingredients,
+        drafts: result.draftMeals,
+        ingredientsAdded: false,
+        questions: result.staplesToAsk,
+        answers: Object.fromEntries(result.staplesToAsk.map((q) => [q.staple, q.lastKnown !== false])),
+        meals: null,
+        feedback: {},
+      });
+      renderAll();
+      $("step-review").scrollIntoView({ behavior: "smooth" });
+    },
+  );
 });
 
 // ---------- Step 2: ingredients and staples ----------
 
 function renderIngredients() {
   $("ingredients").replaceChildren(
-    ...state.ingredients.map((item, index) =>
+    ...session.ingredients.map((item, index) =>
       el("li", {}, [
         el("span", { textContent: item.name }),
         el("span", { className: "qty", textContent: item.quantity }),
@@ -166,7 +206,8 @@ function renderIngredients() {
           textContent: "×",
           title: `${item.name} entfernen`,
           onclick: () => {
-            state.ingredients.splice(index, 1);
+            session.ingredients.splice(index, 1);
+            saveState();
             renderIngredients();
           },
         }),
@@ -175,16 +216,20 @@ function renderIngredients() {
   );
 }
 
-function renderStaples(questions) {
-  $("staples-block").hidden = questions.length === 0;
+function renderStaples() {
+  $("staples-block").hidden = session.questions.length === 0;
   $("staples").replaceChildren(
-    ...questions.map((question) =>
+    ...session.questions.map((question) =>
       el("label", {}, [
         el("input", {
           type: "checkbox",
           value: question.staple,
           // Unknown staples are pre-checked: most households have them
-          checked: question.lastKnown !== false,
+          checked: session.answers[question.staple] ?? question.lastKnown !== false,
+          onchange: (event) => {
+            session.answers[question.staple] = event.target.checked;
+            saveState();
+          },
         }),
         stapleLabel(question.staple),
       ]),
@@ -196,59 +241,76 @@ $("add-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const name = $("add-input").value.trim();
   if (!name) return;
-  state.ingredients.push({ name, quantity: "" });
-  state.ingredientsAdded = true;
+  session.ingredients.push({ name, quantity: "" });
+  session.ingredientsAdded = true;
   $("add-input").value = "";
+  saveState();
   renderIngredients();
 });
 
-function readStaples() {
-  const boxes = [...$("staples").querySelectorAll("input[type=checkbox]")];
+function currentAnswers() {
+  const staples = session.questions.map((question) => question.staple);
+  const checked = (staple) => session.answers[staple] ?? true;
   return {
-    available: boxes.filter((box) => box.checked).map((box) => box.value),
-    missing: boxes.filter((box) => !box.checked).map((box) => box.value),
+    available: staples.filter(checked),
+    missing: staples.filter((staple) => !checked(staple)),
   };
 }
 
-async function requestMeals(draftMeals) {
-  const meals = await createPlanner().suggest({
-    ingredients: state.ingredients.map((item) => item.name),
-    draftMeals,
-    availableStaples: state.staples.available,
-    missingStaples: state.staples.missing,
-  });
-  renderMeals(meals);
-  $("step-results").hidden = false;
-  $("step-results").scrollIntoView({ behavior: "smooth" });
+function requestMeals(kind, buttons, message, draftMeals) {
+  runRequest(
+    kind,
+    buttons,
+    message,
+    () =>
+      createPlanner().suggest({
+        ingredients: session.ingredients.map((item) => item.name),
+        draftMeals,
+        availableStaples: session.staples.available,
+        missingStaples: session.staples.missing,
+      }),
+    (meals) => {
+      session.meals = meals;
+      session.feedback = {};
+      renderAll();
+      $("step-results").scrollIntoView({ behavior: "smooth" });
+    },
+  );
 }
 
-$("suggest-btn").addEventListener("click", () =>
-  withBusy([$("suggest-btn")], "Gerichte werden ausgewählt.", async () => {
-    state.staples = readStaples();
-    // Added ingredients are unknown to the drafts, so new meals are requested
-    await requestMeals(state.ingredientsAdded ? [] : state.drafts);
-  }),
-);
+$("suggest-btn").addEventListener("click", () => {
+  session.staples = currentAnswers();
+  // Added ingredients are unknown to the drafts, so new meals are requested
+  const drafts = session.ingredientsAdded ? [] : session.drafts;
+  requestMeals("suggest", [$("suggest-btn")], "Gerichte werden ausgewählt.", drafts);
+});
 
 // ---------- Step 3: meals ----------
 
-function renderMeal(meal) {
-  const card = el("article", { className: "meal" });
-  const cookButton = el("button", { type: "button", className: "small", textContent: "Kochen wir" });
-  const rejectButton = el("button", { type: "button", className: "small secondary", textContent: "Nicht für uns" });
+function giveFeedback(meal, kind) {
+  memory.record([meal.name], kind);
+  session.feedback[meal.name] = kind;
+  saveState();
+  renderMeals();
+  renderHistory();
+}
 
-  cookButton.onclick = () => {
-    memory.record([meal.name], "cooked");
-    cookButton.textContent = "Gespeichert";
-    cookButton.disabled = rejectButton.disabled = true;
-    renderHistory();
-  };
-  rejectButton.onclick = () => {
-    memory.record([meal.name], "rejected");
-    card.classList.add("rejected");
-    cookButton.disabled = rejectButton.disabled = true;
-    renderHistory();
-  };
+function renderMeal(meal) {
+  const feedback = session.feedback[meal.name];
+  const cookButton = el("button", {
+    type: "button",
+    className: "small",
+    textContent: feedback === "cooked" ? "Gespeichert" : "Kochen wir",
+    disabled: Boolean(feedback),
+    onclick: () => giveFeedback(meal, "cooked"),
+  });
+  const rejectButton = el("button", {
+    type: "button",
+    className: "small secondary",
+    textContent: "Nicht für uns",
+    disabled: Boolean(feedback),
+    onclick: () => giveFeedback(meal, "rejected"),
+  });
 
   const meta = [meal.prep_minutes ? `${meal.prep_minutes} Min.` : null, DIFFICULTY_LABELS[meal.difficulty]];
   const parts = [
@@ -267,11 +329,11 @@ function renderMeal(meal) {
     ]),
     el("div", { className: "row" }, [cookButton, rejectButton]),
   );
-  card.append(...parts);
-  return card;
+  return el("article", { className: feedback === "rejected" ? "meal rejected" : "meal" }, parts);
 }
 
-function renderMeals(meals) {
+function renderMeals() {
+  const meals = session.meals ?? [];
   if (meals.length === 0) {
     $("meals").replaceChildren(
       el("p", { textContent: "Kein neues Gericht gefunden. Zutaten ergänzen oder mehr Vorräte erlauben." }),
@@ -282,18 +344,66 @@ function renderMeals(meals) {
 }
 
 $("more-btn").addEventListener("click", () =>
-  withBusy([$("more-btn"), $("restart-btn")], "Andere Gerichte werden gesucht.", () => requestMeals([])),
+  requestMeals("suggest", [$("more-btn")], "Andere Gerichte werden gesucht.", []),
 );
 
-$("restart-btn").addEventListener("click", () => {
-  state.photos.forEach((photo) => URL.revokeObjectURL(photo.previewUrl));
-  state.photos = [];
-  renderPreviews();
-  $("step-review").hidden = true;
-  $("step-results").hidden = true;
+// ---------- Reset (press and hold) ----------
+
+function resetRun() {
+  runId++;
+  session = emptySession();
+  // A request cancelled by the reset does not re-enable its buttons
+  for (const id of ["analyze-btn", "suggest-btn", "more-btn"]) $(id).disabled = false;
+  sessionStore.clear().catch((error) => console.warn("Clearing the run failed:", error));
+  $("add-input").value = "";
   setStatus("");
+  renderAll();
   window.scrollTo({ top: 0, behavior: "smooth" });
-});
+}
+
+/** Calls onConfirm only after the button was held for durationMs; a short tap shows a hint. */
+function setupHoldButton(button, durationMs, hint, onConfirm) {
+  let timer = null;
+  let confirmed = false;
+  button.style.setProperty("--hold-duration", `${durationMs}ms`);
+
+  const start = (event) => {
+    if (timer) return;
+    if (event.type === "pointerdown" && event.button !== 0) return;
+    if (event.type === "keydown") {
+      if ((event.key !== "Enter" && event.key !== " ") || event.repeat) return;
+      event.preventDefault();
+    }
+    button.classList.add("holding");
+    timer = setTimeout(() => {
+      timer = null;
+      confirmed = true;
+      button.classList.remove("holding");
+      navigator.vibrate?.(40);
+      onConfirm();
+    }, durationMs);
+  };
+  const cancel = () => {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = null;
+    button.classList.remove("holding");
+  };
+
+  button.addEventListener("pointerdown", start);
+  button.addEventListener("keydown", start);
+  // Lifting the finger, moving away or starting to scroll cancels the hold
+  for (const type of ["pointerup", "pointerleave", "pointercancel", "keyup", "blur"]) {
+    button.addEventListener(type, cancel);
+  }
+  button.addEventListener("contextmenu", (event) => event.preventDefault());
+  button.addEventListener("click", () => {
+    if (!confirmed) setStatus(hint);
+    confirmed = false;
+  });
+}
+
+setupHoldButton($("reset-btn"), RESET_HOLD_MS, "Zum Neustart die Taste gedrückt halten.", resetRun);
 
 // ---------- History ----------
 
@@ -328,10 +438,48 @@ function renderHistory() {
   );
 }
 
+// ---------- Rendering ----------
+
+function renderAll() {
+  renderPreviews();
+  $("step-review").hidden = !session.analyzed;
+  if (session.analyzed) {
+    renderIngredients();
+    renderStaples();
+  }
+  $("step-results").hidden = session.meals === null;
+  if (session.meals !== null) renderMeals();
+  $("reset-bar").hidden = session.photos.length === 0 && !session.analyzed;
+}
+
 // ---------- Start ----------
 
-renderHistory();
-if (!settings.apiKey) openSettings();
+async function start() {
+  renderHistory();
+  try {
+    const restored = await sessionStore.load();
+    if (restored) session = restored;
+  } catch (error) {
+    console.warn("Restoring the run failed:", error);
+  }
+  const interrupted = session.pending !== null;
+  session.pending = null;
+  renderAll();
+
+  if (interrupted) {
+    saveState();
+    setStatus("Die letzte Anfrage wurde durch das Neuladen unterbrochen. Bitte erneut starten.", { error: true });
+  }
+  const scroll = Number(sessionStorage.getItem(SCROLL_KEY));
+  if (scroll > 0) window.scrollTo(0, scroll);
+  if (!settings.apiKey) openSettings();
+}
+
+// The content is restored asynchronously, so the scroll position is restored by hand
+history.scrollRestoration = "manual";
+window.addEventListener("pagehide", () => sessionStorage.setItem(SCROLL_KEY, String(window.scrollY)));
+
+start();
 
 // Asks the browser not to evict the stored history when storage runs low
 navigator.storage?.persist?.().catch(() => {});
