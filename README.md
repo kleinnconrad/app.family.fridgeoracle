@@ -33,7 +33,9 @@ The app runs entirely on the phone: there is no server. The phone loads the app 
 
 1. **Photo analysis.** The photos are scaled to a long edge of 3072 px and sent to Gemini with high media resolution, together with the list of allowed staples and the list of blocked meals. Gemini returns the detected ingredients and a few draft meals. Each draft lists the staples it needs.
 2. **Questions.** The app collects the staples the drafts need and asks which of them are at home.
-3. **Selection.** Drafts that need a missing staple, use an ingredient the user removed, or are blocked by the memory are dropped. If too few meals remain, Gemini is asked again with the confirmed ingredient list (text only, no photo).
+3. **Selection.** Drafts that need a missing staple, use an ingredient the user removed, or are blocked by the memory are dropped. The remaining meals are picked for variety: each cooking technique (e.g. wok, braise, soup, gratin) at most once per round, and at most one meal built around cream or cheese. If too few meals remain, Gemini is asked again with the confirmed ingredient list (text only, no photo) and the techniques already used.
+
+The prompt asks Gemini for dishes from different cuisines, each built around one clear idea, with flavor from browning, acidity, condiments and texture contrasts instead of cream and cheese. Generic patterns ("everything in a creamy sauce", "everything covered with cheese and baked") are named as unwanted.
 4. **Memory.** The shown meals and the feedback are stored in the browser storage of the phone (`localStorage`). The current run is stored separately in IndexedDB, because the photos are too large for `localStorage`.
 
 The default model is `gemini-pro-latest`, an alias for the current Gemini Pro model. `gemini-2.5-pro` is no longer available for new API keys. A photo analysis takes about one minute.

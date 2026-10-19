@@ -3,7 +3,7 @@
 // The current run lives in `session` and is saved to IndexedDB after every change,
 // so that a reload restores it. Every render function draws from `session`.
 
-import { createGemini } from "./gemini.js";
+import { TECHNIQUES, createGemini } from "./gemini.js";
 import { Memory } from "./memory.js";
 import { preparePhoto } from "./photos.js";
 import { Planner } from "./planner.js";
@@ -312,7 +312,12 @@ function renderMeal(meal) {
     onclick: () => giveFeedback(meal, "rejected"),
   });
 
-  const meta = [meal.prep_minutes ? `${meal.prep_minutes} Min.` : null, DIFFICULTY_LABELS[meal.difficulty]];
+  const meta = [
+    meal.cuisine || null,
+    TECHNIQUES[meal.technique] ?? null,
+    meal.prep_minutes ? `${meal.prep_minutes} Min.` : null,
+    DIFFICULTY_LABELS[meal.difficulty],
+  ];
   const parts = [
     el("h3", { textContent: meal.name }),
     el("p", { textContent: meal.description }),

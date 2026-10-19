@@ -56,7 +56,8 @@ const photos = photoPaths.map((file) => ({
 function printMeals(meals) {
   for (const meal of meals) {
     const staples = meal.staples.map(stapleLabel).join(", ") || "-";
-    console.log(`  - ${meal.name} (${meal.prep_minutes} min, ${meal.difficulty}) | Vorrat: ${staples}`);
+    const style = [meal.cuisine, meal.technique, meal.rich_dairy ? "Sahne/Käse" : null].filter(Boolean).join(", ");
+    console.log(`  - ${meal.name} [${style}] (${meal.prep_minutes} min, ${meal.difficulty}) | Vorrat: ${staples}`);
     console.log(`      ${meal.description}`);
   }
 }
@@ -68,7 +69,8 @@ console.log(`\nINGREDIENTS (${analysis.ingredients.length}):`);
 for (const item of analysis.ingredients) console.log(`  - ${item.name} (${item.quantity})`);
 console.log("\nDRAFTS:");
 for (const meal of analysis.draftMeals) {
-  console.log(`  - ${meal.name} | Kühlschrank: ${meal.fridge_ingredients.join(", ")} | Vorrat: ${meal.staples}`);
+  const style = [meal.cuisine, meal.technique, meal.rich_dairy ? "Sahne/Käse" : null].filter(Boolean).join(", ");
+  console.log(`  - ${meal.name} [${style}] | Kühlschrank: ${meal.fridge_ingredients.join(", ")} | Vorrat: ${meal.staples}`);
 }
 const questions = analysis.staplesToAsk.map((question) => question.staple);
 console.log(`\nSTAPLE QUESTIONS: ${questions.map(stapleLabel).join(", ") || "-"}`);

@@ -7,6 +7,23 @@ import { ALWAYS_AVAILABLE, STAPLE_KEYS } from "./staples.js";
 export const OUTPUT_LANGUAGE = "German";
 export const DIFFICULTIES = ["easy", "medium", "hard"];
 
+// Cooking techniques. Key: value in the Gemini schema. Value: short German label for the app.
+// The planner allows each technique only once per round, so that the meals differ in method.
+export const TECHNIQUES = {
+  "pan-fry": "Pfanne",
+  "stir-fry": "Wok",
+  roast: "Ofen geröstet",
+  gratin: "Überbacken",
+  bake: "Gebacken",
+  braise: "Geschmort",
+  soup: "Suppe/Eintopf",
+  grill: "Gegrillt",
+  "steam-poach": "Gedämpft/pochiert",
+  boil: "Gekocht",
+  raw: "Roh/Salat",
+};
+export const TECHNIQUE_KEYS = Object.keys(TECHNIQUES);
+
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 // Pro models always think before answering; a photo analysis can take a minute
 const REQUEST_TIMEOUT_MS = 180_000;
@@ -16,9 +33,10 @@ const RETRY_DELAYS_MS = [2_000, 6_000];
 const MEDIA_RESOLUTION = "MEDIA_RESOLUTION_HIGH";
 
 const SYSTEM_INSTRUCTION =
-  "You are a practical home-cooking assistant for a family. You suggest everyday meals that " +
-  "can be cooked in a normal home kitchen with the ingredients that are actually available. " +
-  "You never add ingredients that are not explicitly allowed.";
+  "You are an experienced, creative home cook with a broad knowledge of international cuisines. " +
+  "You suggest meals for a family that taste interesting and can be cooked in a normal home kitchen " +
+  "on a weekday. You only use the ingredients that are actually available and never add ingredients " +
+  "that are not explicitly allowed.";
 
 export class GeminiError extends Error {}
 
@@ -28,6 +46,21 @@ const MEAL_SCHEMA = {
   type: "OBJECT",
   properties: {
     name: { type: "STRING", description: "Name of the dish" },
+    cuisine: { type: "STRING", description: "Cuisine or origin in German, e.g. 'Italienisch', 'Thailändisch'" },
+    technique: {
+      type: "STRING",
+      enum: TECHNIQUE_KEYS,
+      description:
+        "Main cooking technique: pan-fry (searing or frying in a pan), stir-fry (wok, high heat), " +
+        "roast (dry oven heat without cheese topping), gratin (casserole or dish covered with cheese " +
+        "or sauce and baked), bake (dough-based, e.g. quiche, pizza, flatbread), braise, soup (soups " +
+        "and stews), grill, steam-poach, boil (pasta, dumplings or grains as the base), raw (salads, " +
+        "bowls, tartare)",
+    },
+    rich_dairy: {
+      type: "BOOLEAN",
+      description: "True if the dish is built around cream, cream cheese or melted cheese",
+    },
     description: { type: "STRING", description: "One sentence describing the dish" },
     fridge_ingredients: {
       type: "ARRAY",
@@ -43,9 +76,23 @@ const MEAL_SCHEMA = {
     difficulty: { type: "STRING", enum: DIFFICULTIES },
     steps: { type: "ARRAY", items: { type: "STRING" }, description: "Short cooking steps, at most 8" },
   },
-  required: ["name", "description", "fridge_ingredients", "staples", "prep_minutes", "difficulty", "steps"],
+  required: [
+    "name",
+    "cuisine",
+    "technique",
+    "rich_dairy",
+    "description",
+    "fridge_ingredients",
+    "staples",
+    "prep_minutes",
+    "difficulty",
+    "steps",
+  ],
   propertyOrdering: [
     "name",
+    "cuisine",
+    "technique",
+    "rich_dairy",
     "description",
     "fridge_ingredients",
     "staples",
@@ -84,9 +131,34 @@ export const PLAN_SCHEMA = {
 
 // ---------- Prompts ----------
 
-function bulletList(items) {
-  return items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : "- (none)";
+function bulletList(items, indent = "") {
+  const lines = items.length > 0 ? items : ["(none)"];
+  return lines.map((item) => `${indent}- ${item}`).join("\n");
 }
+
+// Guidance against the default patterns (creamy sauce, cheese gratin, everything in one pan).
+const CREATIVITY = `How to make the meals interesting:
+- Use the range of international home cooking, e.g. Italian, Spanish, Greek, Turkish, Levantine, \
+Indian, Thai, Vietnamese, Chinese, Japanese, Korean, Mexican, French and German. Combine \
+different cuisines within one answer.
+- Build each meal around one clear idea with one or two main ingredients. A meal does not have \
+to use many fridge items; leaving items out is better than mixing everything together.
+- Create flavor through technique and contrast instead of cream and cheese: searing and browning, \
+roasting, caramelized onions, acidity (citrus, vinegar, yogurt, pickles), heat (chili, paprika), \
+umami (soy sauce, mustard, cured meat, aged cheese as an accent), fresh components (raw \
+vegetables, salad, herbs) and contrasting textures (crispy against soft).
+- Use the sauces and condiments found in the fridge (e.g. soy sauce, mustard, chili sauce, citrus) \
+as flavor sources.
+- Avoid generic patterns: "everything in a creamy sauce", "everything covered with cheese and \
+baked", "everything mixed into pasta", "everything fried together in one pan".
+- At most one meal may be built around cream, cream cheese or melted cheese ("rich_dairy": true).
+- Every meal must use a different cooking technique ("technique").
+- Prefer concrete, recognizable dishes (e.g. "Shakshuka", "Okonomiyaki", "Frittata", \
+"Gebratener Reis nach kantonesischer Art") over vague names such as "Gemüsepfanne" or \
+"Nudelauflauf".
+- Stay realistic: suitable for a weekday, common home equipment, only the allowed ingredients.
+- Consider dishes from several cuisines before choosing, and pick the most interesting \
+combination that fits the ingredients and these rules.`;
 
 function rules(preferences, excluded) {
   const notes = preferences.dietaryNotes.trim() || "none";
@@ -94,10 +166,11 @@ function rules(preferences, excluded) {
     `- Each meal is for ${preferences.servings} people.`,
     `- Dietary notes: ${notes}`,
     "- Prefer meals that use perishable items first (fresh vegetables, meat, fish, open dairy products).",
-    "- The meals must differ from each other (different main ingredient, cuisine or cooking method).",
-    "- Do not suggest any of the following meals or close variations of them:",
-    bulletList(excluded),
-    `- Write meal names, descriptions, steps and ingredient names in ${OUTPUT_LANGUAGE}.`,
+    "- Do not suggest any of the following meals or close variations of them. The same basic dish " +
+      "in another style or cuisine counts as a close variation (e.g. Thai fried rice after Cantonese " +
+      "fried rice, a frittata after an omelette):",
+    bulletList(excluded, "  "),
+    `- Write meal names, cuisines, descriptions, steps and ingredient names in ${OUTPUT_LANGUAGE}.`,
     '- In "fridge_ingredients", list only fridge items, spelled exactly as in the ingredient list. ' +
       "Do not list the always available basics or pantry staples there.",
     '- In "staples", list only items from the allowed pantry staples that the meal needs.',
@@ -118,16 +191,35 @@ A meal may only use:
 - the fridge items from task 1,
 - these basics, which are always available: ${ALWAYS_AVAILABLE.join(", ")},
 - these pantry staples (the user will be asked whether they have them):
-${bulletList(STAPLE_KEYS)}
+${bulletList(STAPLE_KEYS, "  ")}
 If a pantry staple is visible in the fridge, list it as a fridge item instead.
+
+${CREATIVITY}
 
 Rules:
 ${rules(preferences, excluded)}`;
 }
 
-/** Returns the prompt for meal planning from a confirmed ingredient list (no photo). */
-export function buildPlanPrompt(preferences, ingredients, availableStaples, mealCount, excluded) {
+/**
+ * Returns the prompt for meal planning from a confirmed ingredient list (no photo).
+ * @param {object} preferences Household settings.
+ * @param {string[]} ingredients Fridge items confirmed by the user.
+ * @param {string[]} availableStaples Pantry staples the user has.
+ * @param {number} mealCount Number of meals to suggest.
+ * @param {string[]} excluded Meal names that must not be suggested.
+ * @param {{usedTechniques?: string[], richDairyUsed?: boolean}} [taken] What the meals already
+ *     chosen in this round use, so that the new meals complement them.
+ */
+export function buildPlanPrompt(preferences, ingredients, availableStaples, mealCount, excluded, taken = {}) {
   const missing = STAPLE_KEYS.filter((staple) => !availableStaples.includes(staple));
+  const usedTechniques = taken.usedTechniques ?? [];
+  const complement = [];
+  if (usedTechniques.length > 0) {
+    complement.push(`- These techniques are already used in this round; do not use them: ${usedTechniques.join(", ")}`);
+  }
+  if (taken.richDairyUsed) {
+    complement.push("- A meal built around cream or cheese is already chosen; no further meal may be (rich_dairy: false).");
+  }
   return `Suggest ${mealCount} meals.
 
 Fridge items:
@@ -143,8 +235,10 @@ Not available (do not use): ${missing.join(", ") || "none"}
 A meal may only use the fridge items, the always available basics and the allowed pantry \
 staples. It does not have to use all fridge items.
 
+${CREATIVITY}
+
 Rules:
-${rules(preferences, excluded)}`;
+${rules(preferences, excluded)}${complement.length > 0 ? `\n${complement.join("\n")}` : ""}`;
 }
 
 // ---------- Response validation ----------
@@ -159,6 +253,9 @@ export function sanitizeMeal(raw) {
   const minutes = Number.parseInt(raw.prep_minutes, 10);
   return {
     name: raw.name.trim(),
+    cuisine: typeof raw.cuisine === "string" ? raw.cuisine.trim() : "",
+    technique: TECHNIQUE_KEYS.includes(raw.technique) ? raw.technique : null,
+    rich_dairy: raw.rich_dairy === true,
     description: typeof raw.description === "string" ? raw.description.trim() : "",
     fridge_ingredients: stringList(raw.fridge_ingredients),
     staples: [...new Set(stringList(raw.staples).filter((staple) => STAPLE_KEYS.includes(staple)))],
@@ -285,9 +382,9 @@ export function createGemini({
       return sanitizeAnalysis(await generate(parts, ANALYSIS_SCHEMA, { mediaResolution: MEDIA_RESOLUTION }));
     },
 
-    /** Suggests meals from a confirmed ingredient list. */
-    async plan(ingredients, availableStaples, mealCount, excluded) {
-      const prompt = buildPlanPrompt(preferences, ingredients, availableStaples, mealCount, excluded);
+    /** Suggests meals from a confirmed ingredient list; see buildPlanPrompt for `taken`. */
+    async plan(ingredients, availableStaples, mealCount, excluded, taken = {}) {
+      const prompt = buildPlanPrompt(preferences, ingredients, availableStaples, mealCount, excluded, taken);
       return sanitizePlan(await generate([{ text: prompt }], PLAN_SCHEMA));
     },
   };

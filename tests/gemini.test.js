@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  ANALYSIS_SCHEMA,
   GeminiError,
+  PLAN_SCHEMA,
+  TECHNIQUES,
   buildAnalyzePrompt,
   buildPlanPrompt,
   createGemini,
@@ -125,15 +128,52 @@ test("responseText rejects blocked and truncated answers", () => {
 
 test("sanitizeMeal fixes field types and drops meals without a name", () => {
   assert.equal(sanitizeMeal({ name: " " }), null);
-  assert.deepEqual(sanitizeMeal({ name: "Suppe", prep_minutes: "abc", difficulty: "extreme", steps: [1, "Kochen"] }), {
-    name: "Suppe",
-    description: "",
+  assert.deepEqual(
+    sanitizeMeal({
+      name: "Suppe",
+      technique: "molecular",
+      rich_dairy: "yes",
+      prep_minutes: "abc",
+      difficulty: "extreme",
+      steps: [1, "Kochen"],
+    }),
+    {
+      name: "Suppe",
+      cuisine: "",
+      technique: null,
+      rich_dairy: false,
+      description: "",
     fridge_ingredients: [],
     staples: [],
     prep_minutes: null,
     difficulty: "medium",
     steps: ["Kochen"],
-  });
+    },
+  );
+});
+
+test("meal schema asks for cuisine, technique and the cream/cheese flag", () => {
+  const meal = ANALYSIS_SCHEMA.properties.meals.items;
+  assert.equal(meal.properties.technique.enum.length, Object.keys(TECHNIQUES).length);
+  assert.equal(meal.properties.rich_dairy.type, "BOOLEAN");
+  for (const field of ["cuisine", "technique", "rich_dairy"]) assert.ok(meal.required.includes(field));
+  assert.deepEqual(PLAN_SCHEMA.properties.meals.items, meal);
+});
+
+test("prompts contain the creativity guidance and nested lists", () => {
+  const analyze = buildAnalyzePrompt(PREFERENCES, 6, ["Gulasch"]);
+  assert.match(analyze, /everything in a creamy sauce/);
+  assert.match(analyze, /different cooking technique/);
+  assert.match(analyze, /Consider dishes from several cuisines/);
+  assert.match(analyze, /\n {2}- Gulasch\n/);
+  assert.match(analyze, /\n {2}- onions\n/);
+});
+
+test("plan prompt names techniques and the cream/cheese dish already chosen", () => {
+  const prompt = buildPlanPrompt(PREFERENCES, ["Eier"], [], 2, [], { usedTechniques: ["boil", "gratin"], richDairyUsed: true });
+  assert.match(prompt, /already used in this round; do not use them: boil, gratin/);
+  assert.match(prompt, /no further meal may be \(rich_dairy: false\)/);
+  assert.doesNotMatch(buildPlanPrompt(PREFERENCES, ["Eier"], [], 2, []), /already used in this round/);
 });
 
 test("prompts contain household settings and the output language", () => {
