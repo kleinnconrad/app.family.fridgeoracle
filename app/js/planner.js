@@ -4,15 +4,19 @@
 // 1. analyze: the photos are analyzed; Gemini returns the ingredients and draft meals.
 //    The user is asked only about the staples these drafts need.
 // 2. suggest: drafts that need a missing staple, use a removed ingredient or were
-//    suggested recently are dropped. If too few remain, Gemini is asked again (text only)
-//    with the confirmed ingredients and the available staples.
+//    suggested recently are dropped. The remaining meals are picked for variety (each cooking
+//    technique once, at most one cream or cheese dish). If too few remain, Gemini is asked
+//    again (text only) with the confirmed ingredients, the available staples and the
+//    techniques already used.
 
 import { ALWAYS_AVAILABLE, ALWAYS_AVAILABLE_LABELS, STAPLES, STAPLE_KEYS } from "./staples.js";
 
 // Extra drafts requested in the photo analysis, as a reserve for meals dropped later.
-export const DRAFT_RESERVE = 2;
+export const DRAFT_RESERVE = 3;
 // Maximum text-only Gemini calls per suggest() to fill up the list.
 export const MAX_PLAN_CALLS = 2;
+// Maximum meals per round that are built around cream, cream cheese or melted cheese.
+export const MAX_RICH_DAIRY = 1;
 
 /** Returns a comparable form of a meal or ingredient name (lower case, no punctuation). */
 export function normalize(name) {
@@ -79,6 +83,34 @@ export function usableMeals(meals, ingredients, availableStaples, excluded) {
   return result;
 }
 
+/**
+ * Picks up to `count` meals so that the round stays varied: each cooking technique at most
+ * once and at most MAX_RICH_DAIRY meals built around cream or cheese, counting the meals in
+ * `alreadyChosen`. Meals without a known technique are not limited by technique.
+ */
+export function pickVaried(meals, count, alreadyChosen = []) {
+  const techniques = new Set(alreadyChosen.map((meal) => meal.technique).filter(Boolean));
+  let richDairy = alreadyChosen.filter((meal) => meal.rich_dairy).length;
+  const picked = [];
+  for (const meal of meals) {
+    if (picked.length >= count) break;
+    if (meal.technique && techniques.has(meal.technique)) continue;
+    if (meal.rich_dairy && richDairy >= MAX_RICH_DAIRY) continue;
+    picked.push(meal);
+    if (meal.technique) techniques.add(meal.technique);
+    if (meal.rich_dairy) richDairy++;
+  }
+  return picked;
+}
+
+/** Describes what the chosen meals already use, for the follow-up prompt. */
+function takenBy(meals) {
+  return {
+    usedTechniques: [...new Set(meals.map((meal) => meal.technique).filter(Boolean))],
+    richDairyUsed: meals.filter((meal) => meal.rich_dairy).length >= MAX_RICH_DAIRY,
+  };
+}
+
 /** Application logic between the UI and Gemini/memory. */
 export class Planner {
   /**
@@ -124,13 +156,27 @@ export class Planner {
     const available = STAPLE_KEYS.filter((staple) => pantry[staple] === true);
     const excluded = this.memory.excludedNames();
 
-    let chosen = usableMeals(draftMeals, ingredients, available, excluded).slice(0, this.mealCount);
+    const usable = usableMeals(draftMeals, ingredients, available, excluded);
+    let chosen = pickVaried(usable, this.mealCount);
+    // Usable meals skipped for variety; used only if Gemini cannot deliver enough varied meals
+    const reserve = usable.filter((meal) => !chosen.includes(meal));
     for (let call = 0; call < MAX_PLAN_CALLS; call++) {
       const missingCount = this.mealCount - chosen.length;
       if (missingCount <= 0) break;
       const blocked = [...excluded, ...chosen.map((meal) => meal.name)];
-      const plan = await this.oracle.plan(ingredients, available, missingCount, blocked);
-      chosen = chosen.concat(usableMeals(plan.meals, ingredients, available, blocked).slice(0, missingCount));
+      const plan = await this.oracle.plan(ingredients, available, missingCount, blocked, takenBy(chosen));
+      const candidates = usableMeals(plan.meals, ingredients, available, blocked);
+      const picked = pickVaried(candidates, missingCount, chosen);
+      chosen = chosen.concat(picked);
+      reserve.push(...candidates.filter((meal) => !picked.includes(meal)));
+    }
+    // A full list is more useful than a short one with perfect variety
+    const names = new Set(chosen.map((meal) => normalize(meal.name)));
+    for (const meal of reserve) {
+      if (chosen.length >= this.mealCount) break;
+      if (names.has(normalize(meal.name))) continue;
+      names.add(normalize(meal.name));
+      chosen.push(meal);
     }
 
     this.memory.record(

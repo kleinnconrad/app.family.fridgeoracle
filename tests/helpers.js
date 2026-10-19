@@ -20,9 +20,12 @@ export class Clock {
   }
 }
 
-export function makeMeal(name, fridge = ["Eier"], staples = []) {
+export function makeMeal(name, fridge = ["Eier"], staples = [], { technique = null, richDairy = false } = {}) {
   return {
     name,
+    cuisine: "",
+    technique,
+    rich_dairy: richDairy,
     description: `${name} Beschreibung`,
     fridge_ingredients: fridge,
     staples,
@@ -43,8 +46,8 @@ export class FakeOracle {
     this.analyzeCalls.push({ photos, mealCount, excluded });
     return this.analysis;
   }
-  async plan(ingredients, availableStaples, mealCount, excluded) {
-    this.planCalls.push({ ingredients, availableStaples, mealCount, excluded });
+  async plan(ingredients, availableStaples, mealCount, excluded, taken = {}) {
+    this.planCalls.push({ ingredients, availableStaples, mealCount, excluded, taken });
     return this.plans.shift() ?? { meals: [] };
   }
 }
