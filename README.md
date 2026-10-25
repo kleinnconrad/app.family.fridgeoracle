@@ -46,7 +46,7 @@ Installation requires the app to be served over HTTPS. The repository contains a
 
 1. Push the repository to GitHub. GitHub Pages is free for public repositories; for private repositories it requires a paid plan. The repository contains no secrets, so a public repository is possible. Alternative for a private repository: connect it to [Cloudflare Pages](https://pages.cloudflare.com) (free) with `app` as the output folder and no build command.
 2. In the repository settings, open **Pages** and set **Source** to **GitHub Actions**.
-3. Push to `main`. The workflow runs the tests and deploys. The URL has the form `https://<user>.github.io/fridge-oracle/`.
+3. Push to `main`. The workflow runs the tests and deploys. The URL has the form `https://<user>.github.io/app.family.fridgeoracle/`.
 4. Open the URL in Chrome on the phone, open the menu and select **Install app** (or **Add to Home screen**).
 5. Start the app from the home screen. On the first start, the settings open: enter the Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey).
 
