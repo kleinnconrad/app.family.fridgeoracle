@@ -2,7 +2,10 @@
 
 const STORAGE_KEY = "fridge-oracle:settings";
 
-export const MODEL_OPTIONS = ["gemini-pro-latest", "gemini-3.1-pro-preview", "gemini-2.5-flash"];
+export const MODEL_OPTIONS = ["gemini-pro-latest", "gemini-3.1-pro-preview", "gemini-3.5-flash-lite"];
+
+// Models that Google retires, with their replacement; a saved retired model is replaced when the settings are loaded
+const RETIRED_MODELS = { "gemini-2.5-flash": "gemini-3.5-flash-lite" };
 
 export const DEFAULT_SETTINGS = {
   apiKey: "",
@@ -20,9 +23,10 @@ function clampInt(value, min, max, fallback) {
 /** Returns valid settings, filling in defaults for missing or invalid values. */
 export function sanitizeSettings(raw) {
   const input = raw && typeof raw === "object" ? raw : {};
+  const model = String(input.model ?? "").trim() || DEFAULT_SETTINGS.model;
   return {
     apiKey: String(input.apiKey ?? "").trim(),
-    model: String(input.model ?? "").trim() || DEFAULT_SETTINGS.model,
+    model: RETIRED_MODELS[model] ?? model,
     servings: clampInt(input.servings, 1, 20, DEFAULT_SETTINGS.servings),
     dietaryNotes: String(input.dietaryNotes ?? "").trim(),
     mealCount: clampInt(input.mealCount, 1, 8, DEFAULT_SETTINGS.mealCount),

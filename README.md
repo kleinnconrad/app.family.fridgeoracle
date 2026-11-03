@@ -59,7 +59,7 @@ The settings are opened with the gear icon and stored on the phone.
 | Setting | Default | Meaning |
 |---|---|---|
 | Gemini-API-Schlüssel | (empty) | Required |
-| Modell | `gemini-pro-latest` | `gemini-2.5-flash` is faster and cheaper, but recognizes fewer items |
+| Modell | `gemini-pro-latest` | `gemini-3.5-flash-lite` is faster and cheaper, but can recognize fewer items. A saved `gemini-2.5-flash`, which Google retires on 2026-12-01, is replaced by `gemini-3.5-flash-lite` |
 | Anzahl Personen | 4 | Number of people per meal |
 | Ernährungshinweise | (empty) | Free text, e.g. `kein Schweinefleisch` |
 | Vorschläge pro Runde | 4 | Meals per round |
